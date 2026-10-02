@@ -20,6 +20,13 @@ have a real, permanent free tier — not a trial credit that runs out mid-build.
 That constraint picked the stack in section 6; it isn't a fallback, it's a
 requirement.
 
+**The JSON index is the baseline, not a placeholder to feel bad about.**
+Don't add Chroma because "the plan says Phase 2 is Chroma" — add it when
+there's a specific, measured reason the brute-force index can't keep up
+(section 8's numbers). Keeping the simple version running means a real
+before/after comparison is possible later, instead of just asserting a
+vector DB helped.
+
 ## 2. Scope (v1, and nothing more)
 
 In v1:
@@ -52,8 +59,10 @@ PDF (local, corpus/)
     is deprecated) — gives exact page numbers for free
   → one chunk per page (simple; good enough at this corpus size)
   → embed every chunk (Gemini `embed_content`, model `gemini-embedding-2`,
-    task_type=RETRIEVAL_DOCUMENT) — batched one call per paper, not per
-    page, to stay well inside the free tier's daily request budget
+    task_type=RETRIEVAL_DOCUMENT) — one call per page: a list of texts in
+    one `embed_content` call returns a single combined embedding, not one
+    per item, confirmed by testing (see the eval report, not assumed from
+    docs)
   → store {text, paper, page, vector}:
       Phase 0 — a JSON file + brute-force cosine similarity in numpy
                 (fast enough for a few hundred chunks, no infra needed)
@@ -118,17 +127,44 @@ matrix row for each of those papers.
 Done when: 5 manually-checked questions return correct, correctly-cited
 answers, and the matrix is right for those 5 papers.
 
-### Phase 1 — Whole corpus, matrix complete
-Run indexing and extraction across the full test corpus (up to ~100 papers,
-batched to respect the free-tier request budget).
-Done when: the full matrix matches the hand-built answer key, and 10 example
-questions (including cross-paper ones like the U-Net vs. nnU-Net comparison)
-grade out correct.
+### Phase 1A — 20-paper corpus: validate at a small step up, not a big one
+Expand 5 → 20 papers; re-run indexing (confirms resume/retry still hold,
+not just the design); validate index integrity (page counts, no
+duplicates, no missing papers — `app.eval.validate_index`); expand the
+Q&A set to 10 questions including ones that only make sense at this size
+(cross-paper comparisons, "which papers say nothing about X"); run it, and
+write down the actual graded accuracy — `docs/eval-report.md`, not just a
+feeling that it worked.
+Done when: index validation passes, and the 10-question report exists with
+real pass/fail per question, not just a vibe.
+**Status: done — see `docs/eval-report.md`. 7/10 correct, 1 partial, 2 honest
+abstentions (no hallucinations), plus two real findings (retrieval breadth
+fails on cross-paper aggregate questions; the free tier's real
+`generate_content` cap is 20/day per model, not ~100) that change Phase 1B.**
+
+### Phase 1B — ~100 papers, only after 1A's findings are addressed
+Fix the retrieval-breadth gap 1A exposed (route aggregate/cross-paper
+questions at the literature matrix instead of chunk retrieval, and/or raise
+`k` for synthesis-shaped questions) before scaling the corpus — there's no
+point having 100 papers if the Q&A side still can't answer the kind of
+question a 100-paper corpus is supposed to enable. Then build the full
+corpus and re-run the same evaluation (index validation + the 10-question
+set, extended if needed) at that scale. Extraction alone will take multiple
+days at a 20/day generate_content cap unless load is spread across more
+than one free-tier model id — budget for that rather than being surprised
+by it again.
+Done when: the full matrix matches the hand-built answer key, and the
+10-question set (plus any cross-paper questions specific to the larger
+corpus) grades out correct.
 
 ### Phase 2 — API + real vector DB
-Wrap Phase 0/1 in FastAPI; swap the brute-force JSON/numpy index for Chroma.
-Done when: the same 10 example questions still answer correctly through the
-Chroma-backed retrieval path.
+Wrap Phase 0/1 in FastAPI; swap the brute-force JSON/numpy index for Chroma
+— only once section 8's numbers say brute-force search is actually the
+bottleneck, per the rule in section 1. Measure before/after on the same
+10-question set so the vector DB's benefit is demonstrated, not asserted.
+Done when: the same question set still answers correctly through the
+Chroma-backed retrieval path, with a measured latency/accuracy comparison
+against the JSON-index baseline.
 
 ### Phase 3 — Frontend
 Upload flow, chat UI with visible citations (paper + page), matrix table
@@ -156,9 +192,12 @@ instead if hosting real papers is a copyright risk.
 
 ## 9. Costs
 
-**$0.** Every call in Phase 0–1 runs on Gemini's free tier. The only ongoing
-constraint is the free tier's daily request cap (reported around 100
-requests/day) — see Risks for how the pipeline stays well under it.
+**$0.** Every call runs on Gemini's free tier. The ongoing constraint is
+the free tier's daily cap — measured directly from a real `429` error, not
+estimated from docs: `generate_content` on `gemini-3.8-flash` is capped at
+**20 requests/day**; `embed_content` has a separate, evidently larger quota
+(293 embedding calls plus 10 query embeddings in one day never hit it).
+See Risks for how the pipeline stays resilient to this.
 
 ## 10. Risks and what we do about them
 
@@ -172,23 +211,39 @@ requests/day) — see Risks for how the pipeline stays well under it.
   per-page text extraction → accept some noise in Phase 0 (per-page chunks
   are coarse enough to tolerate most of it); only invest in smarter,
   column-aware extraction if answer-key grading actually fails because of it.
-- **Free-tier rate limit** (~100 requests/day) could block a long debugging
-  session → batch embedding calls per paper, not per page (Phase 0's whole
-  run is ~20 requests); if the cap is ever hit, wait for the daily reset —
-  never add a card to get around it.
+- **Free-tier daily cap** (20 `generate_content` requests/day per model,
+  confirmed by hitting it) could block a long session → both indexing and
+  extraction save incrementally and skip already-done work, so the cap
+  costs a day's wait, not lost progress (confirmed: a run that hit the cap
+  mid-extraction resumed cleanly from where it stopped). If the cap is hit,
+  wait for the daily reset or switch to a different free-tier model id for
+  the rest of that day's work — never add a card to get around it.
+- **Retrieval breadth fails on cross-paper aggregate questions**
+  ("which papers don't mention X", "compare across the whole corpus") →
+  `top_k` similarity search surfaces chunks closest to the question, which
+  for an absence/aggregate question is exactly the wrong set. Found during
+  Phase 1A grading (`docs/eval-report.md`), not before. The model declined
+  rather than hallucinating when under-supplied, which is the correct
+  fallback behavior — but it's still a wrong answer. Fix before Phase 1B:
+  route this question shape at the literature matrix instead of chunk
+  retrieval.
 - **Copyright on redistributing papers in a public demo** → keep the corpus
   private/gitignored, or restrict any public demo to open-access papers
   only; a video demo avoids the question entirely.
 - **Scope creep into "generic chat with PDF"** → rule in section 1; matrix
   correctness is graded before any chat-UI polish happens.
 
-## 11. First 5 tasks
-1. ~~Pull 10 open-access liver-segmentation papers into `corpus/`, hand-write
-   the answer key~~ — done: `corpus/`, `docs/answer-key.md`.
+## 11. First 5 tasks — all done (Phase 0 + 1A)
+1. ~~Pull papers into `corpus/`, hand-write the answer key~~ — done: 20
+   papers, `docs/answer-key.md` (10 Q&A pairs + a 20-row matrix).
 2. ~~Scaffold `backend/` (FastAPI) and `frontend/` (Vite) skeletons~~ — done.
-3. Script: build the index — extract, chunk, embed (batched per paper),
-   save `{text, paper, page, vector}` to a local JSON file.
-4. Script: embed a question, brute-force retrieve top-k chunks, ask Gemini
-   for a cited answer; grade against the answer key.
-5. Script: one structured-extraction call per paper; grade the matrix
-   against the answer key.
+3. ~~Script: build the index~~ — done: `app.ingest.build_index`, one
+   `embed_content` call per page, resumable, retries 429/503/connection
+   errors. 293 chunks, validated by `app.eval.validate_index`.
+4. ~~Script: retrieve + ask, grade against the answer key~~ — done:
+   `app.rag.ask` + `app.eval.run_eval`; graded in `docs/eval-report.md`.
+5. ~~Script: structured extraction per paper, grade the matrix~~ — done:
+   `app.extract.matrix` (resumable; hit and survived the real 20/day cap
+   mid-run).
+
+Next tasks are Phase 1B's, listed in section 7.

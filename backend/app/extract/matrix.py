@@ -1,7 +1,10 @@
 """Extract one literature-matrix row per indexed paper; writes docs/matrix.csv.
 
 Grade the output against docs/answer-key.md by hand before trusting it on a
-bigger corpus - that's the whole point of Phase 0.
+bigger corpus - that's the whole point of Phase 0/1A. Saves after every row
+and skips papers already in the CSV, so hitting the free tier's daily
+generate_content cap mid-run costs only the papers not yet done, not the
+rows already extracted.
 
 Run: python -m app.extract.matrix
 """
@@ -51,6 +54,9 @@ class LiteratureMatrixRow(BaseModel):
     limitation: str
 
 
+FIELDNAMES = ["key", "paper", "dataset", "model", "method", "metric", "result", "limitation"]
+
+
 def papers_from_index(chunks: list[dict]) -> dict[str, dict]:
     papers = defaultdict(lambda: {"title": None, "pages": []})
     for c in chunks:
@@ -72,22 +78,38 @@ def extract_one(client: genai.Client, pages: list[tuple[int, str]]) -> Literatur
     return response.parsed
 
 
+def load_existing_rows() -> list[dict]:
+    if not OUTPUT_PATH.exists():
+        return []
+    with OUTPUT_PATH.open(newline="") as f:
+        return list(csv.DictReader(f))
+
+
+def save_rows(rows: list[dict]) -> None:
+    OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with OUTPUT_PATH.open("w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=FIELDNAMES)
+        writer.writeheader()
+        writer.writerows(rows)
+
+
 def main() -> None:
     client = genai.Client()
     papers = papers_from_index(load_index())
 
-    rows = []
+    rows = load_existing_rows()
+    done = {r["key"] for r in rows}
+
     for key, paper in papers.items():
+        if key in done:
+            print(f"{key}: already extracted")
+            continue
         row = extract_one(client, paper["pages"])
-        rows.append({"paper": paper["title"], **row.model_dump()})
+        rows.append({"key": key, "paper": paper["title"], **row.model_dump()})
+        save_rows(rows)
         print(f"{key}: {row.dataset} | {row.model} | {row.result}")
 
-    OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
-    with OUTPUT_PATH.open("w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
-        writer.writeheader()
-        writer.writerows(rows)
-    print(f"\nWrote {len(rows)} rows to {OUTPUT_PATH}")
+    print(f"\n{len(rows)}/{len(papers)} rows in {OUTPUT_PATH}")
 
 
 if __name__ == "__main__":

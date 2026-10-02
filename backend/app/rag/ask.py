@@ -26,7 +26,7 @@ excerpts don't contain the answer, say so instead of guessing.
 Question: {question}"""
 
 
-def ask(question: str, k: int = 8) -> None:
+def ask(question: str, k: int = 8) -> tuple[str, list[dict]]:
     client = genai.Client()
     chunks = load_index()
 
@@ -42,14 +42,15 @@ def ask(question: str, k: int = 8) -> None:
         contents=[PROMPT_TEMPLATE.format(excerpts=excerpts, question=question)],
     ))
 
-    print(response.text)
-    print("\nRetrieved from:")
-    for c in retrieved:
-        print(f"  [{c['title']}, page {c['page']}]")
+    return response.text, retrieved
 
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
         print("Usage: python -m app.rag.ask QUESTION")
         sys.exit(1)
-    ask(sys.argv[1])
+    answer, retrieved = ask(sys.argv[1])
+    print(answer)
+    print("\nRetrieved from:")
+    for c in retrieved:
+        print(f"  [{c['title']}, page {c['page']}]")
