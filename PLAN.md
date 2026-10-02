@@ -142,17 +142,42 @@ abstentions (no hallucinations), plus two real findings (retrieval breadth
 fails on cross-paper aggregate questions; the free tier's real
 `generate_content` cap is 20/day per model, not ~100) that change Phase 1B.**
 
-### Phase 1B — ~100 papers, only after 1A's findings are addressed
-Fix the retrieval-breadth gap 1A exposed (route aggregate/cross-paper
-questions at the literature matrix instead of chunk retrieval, and/or raise
-`k` for synthesis-shaped questions) before scaling the corpus — there's no
-point having 100 papers if the Q&A side still can't answer the kind of
-question a 100-paper corpus is supposed to enable. Then build the full
-corpus and re-run the same evaluation (index validation + the 10-question
-set, extended if needed) at that scale. Extraction alone will take multiple
+### Phase 1B-0 — Retrieval-breadth fix + regression test
+Smallest possible change, nothing else: classify a question as
+corpus-wide/aggregate (`app.rag.classify`, keyword/alias heuristic, no
+model call) and, only for those, add the full literature matrix to the
+prompt alongside the unchanged chunk excerpts — not instead of them.
+Re-run the same 10-question set and compare per-question against Phase 1A.
+No Chroma, no embeddings changes, no section-aware chunking, no fancier
+classifier — PLAN.md section 1's rule about not adding infrastructure
+before measuring the need applies here too.
+Done when: the regression table shows the previously-failing aggregate
+questions fixed, the previously-passing ones still pass, and the
+comparison was run on the *same model* as Phase 1A so the fix is isolated
+from unrelated variables.
+**Status: fix implemented and tested, but the regression run that tested
+it was not same-model** — `gemini-3.8-flash`'s 20/day cap was already
+spent on Phase 1A, so this run used `gemini-3.5-flash`/`-lite` instead (see
+`docs/eval-report.md`). Result: 2 clean fixes, 1 fix that inherited a data
+error from the regenerated matrix, 3 regressions that all land on the
+*unchanged* chunk-only path (consistent with the substitute model being
+weaker at precise table-reading, not with the fix breaking anything), 4
+unchanged. The architecture appears to work; the test that would prove it
+cleanly — same model, before vs. after — hasn't been run yet. That's the
+first thing to do before Phase 1B, not a thing to skip because today's
+numbers already look decent.
+
+### Phase 1B — ~100 papers, only after 1B-0 is confirmed clean
+Re-run Phase 1B-0's regression once on `gemini-3.8-flash` (quota permitting)
+to confirm the fix in isolation. Only then build the full ~100-paper corpus
+and re-run the same evaluation (index validation + the 10-question set,
+extended if needed) at that scale. Extraction alone will take multiple
 days at a 20/day generate_content cap unless load is spread across more
-than one free-tier model id — budget for that rather than being surprised
-by it again.
+than one free-tier model id — already demonstrated as a working pattern in
+1B-0, so budget for it rather than being surprised by it again. Also carry
+forward 1B-0's finding that matrix-row errors can surface in Q&A answers
+now, not just in the matrix export — grade matrix quality as part of Q&A
+correctness, not separately.
 Done when: the full matrix matches the hand-built answer key, and the
 10-question set (plus any cross-paper questions specific to the larger
 corpus) grades out correct.

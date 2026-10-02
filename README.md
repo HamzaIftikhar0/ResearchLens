@@ -8,9 +8,12 @@ See [PLAN.md](PLAN.md) for scope, architecture, and phases.
 
 ## Status
 
-Phase 1A: a 20-paper liver-segmentation test corpus, indexed and evaluated
-against a 10-question hand-built answer key. No UI yet. See
-[docs/eval-report.md](docs/eval-report.md) for the graded results.
+Phase 1B-0: a 20-paper liver-segmentation test corpus, indexed and
+evaluated against a 10-question hand-built answer key; a retrieval-breadth
+fix implemented and tested, with an honest regression table rather than a
+clean-looking one — the test run was confounded by a forced model swap
+(daily quota), so the fix works but hasn't yet been isolated from that
+confound. No UI yet. See [docs/eval-report.md](docs/eval-report.md).
 
 ## Layout
 
@@ -39,9 +42,17 @@ not by reading documentation:
   quota. Both the indexing and extraction scripts save incrementally and
   skip already-done work, so hitting a cap mid-run costs the remainder of
   that day, not progress already made.
+- **Free-tier quota buckets are per-model, not shared** — confirmed by
+  hitting `gemini-3.8-flash`'s cap mid-task and finding `gemini-3.5-flash`
+  and `gemini-3.5-flash-lite` both had fresh quota. Useful for spreading a
+  day's work across models, but not free: a weaker substitute model
+  misread the same results table `gemini-3.8-flash` had read correctly,
+  and that error then propagated from the matrix export into a Q&A answer
+  that cited it — matrix quality is now part of Q&A correctness, not a
+  separate concern.
 
 Full write-up, including a retrieval-breadth limitation the 10-question
-eval exposed: [docs/eval-report.md](docs/eval-report.md).
+eval exposed and the fix for it: [docs/eval-report.md](docs/eval-report.md).
 
 ## Run it
 

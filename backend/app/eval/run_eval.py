@@ -1,5 +1,6 @@
 """Run the 10-question eval set against the indexed corpus; writes raw
-output to docs/eval-outputs.md for manual grading against docs/answer-key.md.
+output (plus per-question latency and aggregate-routing classification) to
+docs/eval-outputs.md for manual grading against docs/answer-key.md.
 
 This script runs the questions and records what the pipeline said -
 grading that output against the answer key is a separate, human step
@@ -9,9 +10,12 @@ questions never silently overwrites a prior grading.
 Run: python -m app.eval.run_eval
 """
 
+import time
+from datetime import datetime, timezone
 from pathlib import Path
 
-from app.rag.ask import ask
+from app.rag.ask import CHAT_MODEL, ask
+from app.rag.classify import is_aggregate_question
 
 OUTPUT_PATH = Path(__file__).resolve().parents[3] / "docs" / "eval-outputs.md"
 
@@ -30,17 +34,30 @@ QUESTIONS = [
 
 
 def main() -> None:
-    lines = ["# Eval run output (ungraded)\n"]
-    for i, question in enumerate(QUESTIONS, start=1):
-        print(f"[{i}/{len(QUESTIONS)}] {question}")
-        answer, retrieved = ask(question)
+    timestamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    lines = [f"# Eval run output (ungraded)\n\nModel: `{CHAT_MODEL}` · Run: {timestamp}\n"]
+    latencies = {"normal": [], "aggregate": []}
 
-        lines.append(f"## Q{i}. {question}\n")
+    for i, question in enumerate(QUESTIONS, start=1):
+        aggregate = is_aggregate_question(question)
+        print(f"[{i}/{len(QUESTIONS)}] {'[aggregate] ' if aggregate else ''}{question}")
+
+        start = time.monotonic()
+        answer, retrieved = ask(question)
+        elapsed = time.monotonic() - start
+        latencies["aggregate" if aggregate else "normal"].append(elapsed)
+
+        lines.append(f"## Q{i}. {question}")
+        lines.append(f"*routed: {'aggregate (matrix + excerpts)' if aggregate else 'normal (excerpts only)'} · {elapsed:.1f}s*\n")
         lines.append(f"{answer}\n")
         lines.append("**Retrieved from:**")
         for c in retrieved:
             lines.append(f"- [{c['title']}, page {c['page']}]")
         lines.append("")
+
+    for label, values in latencies.items():
+        if values:
+            print(f"{label}: {len(values)} questions, avg {sum(values)/len(values):.1f}s, max {max(values):.1f}s")
 
     OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
     OUTPUT_PATH.write_text("\n".join(lines))

@@ -10,6 +10,7 @@ Run: python -m app.extract.matrix
 """
 
 import csv
+import os
 from collections import defaultdict
 from pathlib import Path
 
@@ -23,7 +24,9 @@ from app.ingest.index_store import load_index
 
 load_dotenv()
 
-MODEL = "gemini-3.8-flash"
+# Overridable so a day's work can be split across the free tier's separate
+# per-model quotas (e.g. CHAT_MODEL=gemini-3.5-flash) without editing code.
+MODEL = os.environ.get("CHAT_MODEL", "gemini-3.8-flash")
 OUTPUT_PATH = Path(__file__).resolve().parents[3] / "docs" / "matrix.csv"
 
 EXTRACTION_PROMPT = """Read the attached paper excerpts (each marked with its
