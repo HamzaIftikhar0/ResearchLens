@@ -26,8 +26,14 @@ liver-segmentation test corpus, no UI yet.
 cd backend
 python3 -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env   # then set ANTHROPIC_API_KEY
+cp .env.example .env   # then set GEMINI_API_KEY (free, no card: aistudio.google.com/app/apikey)
+
+python -m app.ingest.build_index
+python -m app.rag.ask "Compare U-Net and nnU-Net for liver segmentation"
+python -m app.extract.matrix
 ```
+
+Runs entirely on Gemini's free tier — see [PLAN.md](PLAN.md) section 9.
 
 ## Keep secrets out of git
 

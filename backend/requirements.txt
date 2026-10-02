@@ -1,4 +1,6 @@
-anthropic
+google-genai
+pymupdf
+numpy
 pydantic
 python-dotenv
 fastapi

@@ -15,6 +15,11 @@ answers questions about PDFs is a weekend project everyone has seen; a tool
 that turns 50 papers into a correct, exportable literature matrix is not. If
 a feature doesn't move the matrix or the citation accuracy forward, it waits.
 
+**Zero running cost, no exceptions.** Every API this project touches has to
+have a real, permanent free tier — not a trial credit that runs out mid-build.
+That constraint picked the stack in section 6; it isn't a fallback, it's a
+requirement.
+
 ## 2. Scope (v1, and nothing more)
 
 In v1:
@@ -39,99 +44,91 @@ is the actual first query to get working, not a placeholder example. Use
 open-access versions (arXiv / PMC) so the corpus can also appear in a public
 demo without copyright problems — see Risks.
 
-## 4. Pipeline — v1 (no vector DB yet)
+## 4. Pipeline
 
 ```
-PDF upload
-  → Files API (upload once, keep the file_id)
-  → per question: send the relevant paper(s) as `document` blocks,
-    citations enabled
-  → Claude answers, cites paper + page
-  → separate call, per paper: structured extraction
-    (output_config.format, JSON schema) → one matrix row
-  → UI: chat view + matrix table view, CSV export
+PDF (local, corpus/)
+  → text extraction per page (PyMuPDF — `import pymupdf`, the `fitz` alias
+    is deprecated) — gives exact page numbers for free
+  → one chunk per page (simple; good enough at this corpus size)
+  → embed every chunk (Gemini `embed_content`, model `gemini-embedding-2`,
+    task_type=RETRIEVAL_DOCUMENT) — batched one call per paper, not per
+    page, to stay well inside the free tier's daily request budget
+  → store {text, paper, page, vector}:
+      Phase 0 — a JSON file + brute-force cosine similarity in numpy
+                (fast enough for a few hundred chunks, no infra needed)
+      Phase 2 — swap the storage/search step for Chroma; nothing else
+                in the pipeline changes
+  → question: embed it (task_type=RETRIEVAL_QUERY), retrieve top-k chunks,
+    build a prompt where each chunk is labelled [paper, page N], ask
+    Gemini (`gemini-3.8-flash`) to answer using only those labelled
+    chunks and to cite them
+  → structured extraction: feed a paper's chunk text back to Gemini with
+    `response_schema=LiteratureMatrixRow`, `response_mime_type=
+    "application/json"` → read `response.parsed`, one call per paper
 ```
 
-A fact that changes the architecture: Claude's context window is 1M tokens
-and PDF documents support native page-level citations
-(`citations: {enabled: true}` on a `document` content block) — but that's
-incompatible with structured JSON output on the *same* call. So
-Q&A-with-citations and matrix-extraction are always two separate calls,
-never one. For a library under roughly 30–40 papers, whole relevant PDFs can
-go straight into context instead of hand-rolling retrieval — simpler, and
-the citations are exact page numbers, not a chunk-overlap guess.
+Why this looks different from a typical "upload PDF, ask Claude" design:
+Gemini has no native page-grounded citation primitive the way Claude's
+`citations: {enabled: true}` is — verified directly against the docs, not
+assumed. So the shortcut an Anthropic-based v1 could use (hand the model a
+whole PDF, trust its built-in citations, skip chunking) isn't available
+here. Chunking and embeddings move from "a scaling optimization for later"
+to "required from day one," because labelling each chunk with its real page
+number *during indexing* is the only way citations are grounded in fact
+rather than the model guessing a page number from memory. That's not a
+downgrade — it's the real RAG pipeline the original pitch wanted, just
+arriving in Phase 0 instead of Phase 2.
 
-## 5. Pipeline — v2 (the scaling layer: embeddings + vector DB)
-
-Once a library is bigger than comfortably fits in context, or re-sending
-full PDFs per question gets expensive, add retrieval in front of the same
-two calls:
-
-```
-PDF → text + layout extraction (PyMuPDF)
-  → section-aware chunking (Abstract/Methods/Results/Limitations)
-  → embeddings (third-party — Claude has no first-party embeddings
-    endpoint; Voyage AI or a local sentence-transformers/BGE model)
-  → vector store (Chroma to start; pgvector-on-Postgres is the
-    production swap, reusing the HEMS backend stack)
-  → top-k retrieval → same citation-enabled document/text call
-```
-
-This is the layer that actually earns the "RAG + embeddings + vector DB"
-line on the CV — v1 proves the product works, v2 proves you understand why
-retrieval exists and when it's needed instead of defaulting to it on day one.
-
-## 6. Tech stack
+## 5. Tech stack
 
 | Layer | Choice | Why |
 |---|---|---|
-| LLM | Claude API — `claude-opus-5-5` by default; `claude-sonnet-5-5` as the budget tier for everyday Q&A once cost matters (your call to make when you wire it up, not a silent downgrade) | Native PDF citations, 1M context, structured outputs |
-| Structured extraction | `output_config.format` + `client.messages.parse()` | current API — the schema-validated path, not the deprecated `output_format` param |
-| PDF handling | Files API (`client.files.upload`) | upload once, reference by `file_id` across every question |
-| Embeddings (v2) | Voyage AI, or a local sentence-transformers/BGE model for zero API cost | Anthropic has no native embeddings endpoint |
-| Vector DB (v2) | Chroma (embedded, zero infra) → pgvector on Postgres later | Chroma for speed now; pgvector reuses what HEMS already taught you |
+| LLM | Gemini API — `gemini-3.8-flash` | genuinely free tier, native structured JSON output |
+| Embeddings | Gemini API — `gemini-embedding-2` | free tier, native embeddings endpoint |
+| PDF extraction | PyMuPDF | local, free, gives exact page numbers |
+| Retrieval (Phase 0) | Brute-force cosine similarity over a JSON index, in numpy | a few hundred vectors doesn't justify a real vector DB yet |
+| Retrieval (Phase 2) | Chroma (embedded) → pgvector on Postgres later | swap in once the corpus outgrows brute-force search |
 | Backend | FastAPI | same stack as the HEMS backend, no new framework to learn |
 | Frontend | React + Vite, minimal | upload, chat, table — not a design project |
 | Storage | Local filesystem for PDFs (S3-compatible later); SQLite/Postgres for metadata and matrix rows | |
 
-## 7. Folder layout
+## 6. Folder layout
 
 ```
 ResearchLens/
   PLAN.md
   backend/
     app/
-      ingest/        PDF upload, Files API bookkeeping
-      rag/            question -> citation-enabled answer
+      ingest/        PDF -> text -> chunks -> embeddings -> index
+      rag/            question -> retrieval -> cited answer
       extract/        structured literature-matrix extraction
-      retrieval/      v2: chunking, embeddings, vector store
-      api/            FastAPI routes
+      api/            FastAPI routes (from Phase 2)
   frontend/          React + Vite app
   corpus/            open-access liver-segmentation test papers (gitignored if license is unclear)
   docs/              architecture notes, demo script, hand-built answer key for grading
 ```
 
-## 8. Phases and milestones
+## 7. Phases and milestones
 
-### Phase 0 — Prove the core call (days, not weeks; no UI)
-Script: upload 5–10 corpus papers via the Files API, ask "what dataset did
-paper X use", get a cited answer; separately, extract the matrix row for
-each of those papers.
+### Phase 0 — Prove the core pipeline (days, not weeks; no UI)
+Build the index for 5–10 corpus papers (extract, chunk, embed, store as
+JSON + numpy); ask the 5 answer-key questions through retrieval; extract the
+matrix row for each of those papers.
 Done when: 5 manually-checked questions return correct, correctly-cited
 answers, and the matrix is right for those 5 papers.
 
 ### Phase 1 — Whole corpus, matrix complete
-Run both calls across the full test corpus (up to ~100 papers, batched).
-Done when: the full matrix matches a hand-built answer key you write
-yourself, and 10 example questions (including cross-paper ones like the
-U-Net vs. nnU-Net comparison) grade out correct.
+Run indexing and extraction across the full test corpus (up to ~100 papers,
+batched to respect the free-tier request budget).
+Done when: the full matrix matches the hand-built answer key, and 10 example
+questions (including cross-paper ones like the U-Net vs. nnU-Net comparison)
+grade out correct.
 
-### Phase 2 — API + v2 retrieval layer
-Wrap Phase 0/1 in FastAPI; add chunking + embeddings + Chroma; add a
-size/cost threshold that switches a library from "whole PDFs in context" to
-"retrieve top-k chunks first."
-Done when: a library past the threshold still answers the same 10 example
-questions correctly through the retrieval path.
+### Phase 2 — API + real vector DB
+Wrap Phase 0/1 in FastAPI; swap the brute-force JSON/numpy index for Chroma.
+Done when: the same 10 example questions still answer correctly through the
+Chroma-backed retrieval path.
 
 ### Phase 3 — Frontend
 Upload flow, chat UI with visible citations (paper + page), matrix table
@@ -141,12 +138,13 @@ the API docs.
 
 ### Phase 4 — Polish for the CV
 Demo video (the U-Net vs. nnU-Net query is the money shot), README with an
-architecture diagram, a short write-up of the v1-vs-v2 retrieval decision —
-it's a genuine design call, so say so. Host a small public demo only with
-open-access papers, or ship a recorded demo instead if hosting real papers
-is a copyright risk.
+architecture diagram, a short write-up of *why* retrieval was built from day
+one instead of deferred — it's a real design call forced by the zero-cost
+constraint, and explaining it is more interesting than hiding it. Host a
+small public demo only with open-access papers, or ship a recorded demo
+instead if hosting real papers is a copyright risk.
 
-## 9. Numbers to hit (quality, not revenue)
+## 8. Numbers to hit (quality, not revenue)
 
 | Metric | Floor | Good |
 |---|---|---|
@@ -154,43 +152,43 @@ is a copyright risk.
 | Matrix field accuracy vs. hand-built answer key | 70% | 90% |
 | Cross-paper comparison questions graded correct | 70% | 90% |
 | End-to-end answer latency | < 15s | < 5s |
-| Library size handled before switching to v2 retrieval | 30 papers | 100+ papers |
+| Chunks handled by brute-force search before needing Chroma | 500 | 2,000+ |
 
-## 10. Costs (monthly, while building/demoing)
+## 9. Costs
 
-| Item | USD |
-|---|---|
-| Claude API (dev + demo volume, mixed Opus/Sonnet) | 5–20 |
-| Embeddings (v2, if hosted rather than local) | 0–5 |
-| Hosting (only if a public demo ships; a recorded demo instead = $0) | 0–10 |
-| **Total** | **~5–35** |
+**$0.** Every call in Phase 0–1 runs on Gemini's free tier. The only ongoing
+constraint is the free tier's daily request cap (reported around 100
+requests/day) — see Risks for how the pipeline stays well under it.
 
-## 11. Risks and what we do about them
+## 10. Risks and what we do about them
 
 - **Hallucinated citations** (answer cites a page that doesn't support the
-  claim) → every answer must use Claude's native `citations` feature, not a
-  free-text "according to paper X" — then spot-check cited pages by hand
-  during Phase 0/1 grading, not just trust the feature.
-- **PDF layout chaos** (two-column papers, tables, figures) breaks naive
-  text extraction in v2 → v1's whole-PDF approach sidesteps this almost
-  entirely, which is another reason it comes first.
+  claim) → the model only ever sees page-labelled chunks, never the raw
+  question alone, so a citation can only reference a page we actually
+  retrieved — then spot-check cited pages by hand during Phase 0/1 grading,
+  since "the label exists" isn't the same as "the label is the right page
+  for that specific claim."
+- **PDF layout chaos** (two-column papers, tables, figures) can scramble
+  per-page text extraction → accept some noise in Phase 0 (per-page chunks
+  are coarse enough to tolerate most of it); only invest in smarter,
+  column-aware extraction if answer-key grading actually fails because of it.
+- **Free-tier rate limit** (~100 requests/day) could block a long debugging
+  session → batch embedding calls per paper, not per page (Phase 0's whole
+  run is ~20 requests); if the cap is ever hit, wait for the daily reset —
+  never add a card to get around it.
 - **Copyright on redistributing papers in a public demo** → keep the corpus
   private/gitignored, or restrict any public demo to open-access papers
   only; a video demo avoids the question entirely.
 - **Scope creep into "generic chat with PDF"** → rule in section 1; matrix
   correctness is graded before any chat-UI polish happens.
-- **Structured output and citations can't run in one call** → already
-  designed around in section 4; don't try to merge them later to "save a
-  call."
 
-## 12. First 5 tasks if this plan is approved
-1. Pull 10 open-access liver-segmentation papers (arXiv/PMC) into `corpus/`,
-   and hand-write the answer key (matrix rows + 5 Q&A pairs) before writing
-   any code.
-2. Scaffold `backend/` (FastAPI) and `frontend/` (Vite) skeletons; no logic
-   yet.
-3. Script: Files API upload for the 10 papers, store the `file_id`s.
-4. Script: one citation-enabled Q&A call against the corpus; grade against
-   the answer key.
+## 11. First 5 tasks
+1. ~~Pull 10 open-access liver-segmentation papers into `corpus/`, hand-write
+   the answer key~~ — done: `corpus/`, `docs/answer-key.md`.
+2. ~~Scaffold `backend/` (FastAPI) and `frontend/` (Vite) skeletons~~ — done.
+3. Script: build the index — extract, chunk, embed (batched per paper),
+   save `{text, paper, page, vector}` to a local JSON file.
+4. Script: embed a question, brute-force retrieve top-k chunks, ask Gemini
+   for a cited answer; grade against the answer key.
 5. Script: one structured-extraction call per paper; grade the matrix
    against the answer key.
