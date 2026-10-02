@@ -175,6 +175,45 @@ grading: when an aggregate answer cites `[paper]` (matrix-sourced) rather
 than `[paper, page N]` (excerpt-sourced), that claim is only as reliable as
 the matrix row backing it.
 
+## Matrix-grounding regression: two separate measurements, not one
+
+The risk above means "the matrix propagates into answers" is only a
+problem in proportion to how often the matrix itself is wrong. That's
+measurable independently of any Q&A run, and against *original paper
+text*, not just against "does this look plausible" — so it was checked
+before trusting the matrix any further.
+
+**1. Matrix correctness.** Every one of the 20 `matrix.csv` rows was
+compared against the facts in `docs/answer-key.md` (itself built by
+reading each paper directly, not recalled) or, where the answer key didn't
+cover a specific number, against a fresh re-read of the source PDF.
+**Result: 19/20 rows correct, 1 confirmed wrong** (`nnunet` — the same
+Hippocampus-column-read-as-Liver error already known from Q2/Q3/Q7). Every
+other row's dataset, result figures, and stated limitations matched the
+source exactly, including dense multi-decimal tables (H-DenseUNet's
+72.2/82.4/96.1/96.5 leaderboard row, ResUNet++'s 4-decimal precision/recall
+pairs). This is a single-row problem, not a systemic one — `nnunet`'s
+source table (nnU-Net paper, Table 2) is unusually dense (13 tasks × 2
+labels × 7 model configurations in one table), which plausibly explains
+why it was the one row a weaker model misread while 19 simpler tables came
+through clean. **Fixed directly** (hand-corrected to 95.24/73.71 against
+the verified source, no API call needed — the error and the correct value
+were already known) rather than spending quota re-extracting a row whose
+correct value wasn't in question.
+
+**2. Q&A-correctness-given-the-matrix.** Checked by tracing Q6's full
+answer back to ground truth: it named 9 papers (plus a 10th, defensibly)
+as reporting no liver result, which implies the other 10 corpus papers
+*do* report one. Both halves of that 9-vs-10 split are correct against the
+verified facts — **20/20 papers correctly classified** — even though the
+matrix it drew from had the `nnunet` error at the time. That's because Q6
+only needed *presence/absence* of a liver result, which `nnunet`'s row
+still correctly implied despite having the wrong number; Q7 needed the
+actual *value*, which is where the same error surfaced as a wrong figure
+in the answer. Useful distinction going forward: a matrix error can be
+invisible to presence/absence questions and still corrupt value questions
+from the same row.
+
 ## Latency
 
 Not captured for this run — `app/eval/run_eval.py` now records
@@ -183,15 +222,28 @@ aggregate or normal (see its source), but that instrumentation landed
 *after* this run, to avoid spending more of an already-scarce daily quota
 on a timing-only re-run. The next full re-run will have it for free.
 
+## Current status
+
+**Phase 1A: complete. Retrieval-breadth fix: implemented, promising but
+not yet isolated. Matrix: independently verified (19/20 correct, the 1
+known error now hand-corrected). Regression: inconclusive due to a
+model-quota confound. Phase 1B: blocked pending a same-model regression.**
+
 ## What's next
 
-1. **Re-run this exact 10-question set on `gemini-3.8-flash`** once its
-   quota resets, to get a same-model before/after comparison that isolates
-   the routing fix from today's forced model swap. This is the one
-   genuinely missing piece — everything else in this section is honest
-   about being confounded until that happens.
+1. **Re-run this exact 10-question set on `gemini-3.8-flash`**, same
+   corpus, same index, same (now-corrected) matrix, same classifier, same
+   prompts, same `k`, same answer key — once its quota resets. This is the
+   one genuinely missing piece. The comparison that matters: do Q6/Q10
+   stay fixed *and* do Q2/Q3/Q9 recover back to Phase 1A's correct answers
+   on the model that originally got them right? If yes, the fix is clean.
+   If Q6/Q10 stay fixed but something *else* regresses on this same model,
+   the fix itself needs investigating, not just the quota.
 2. Treat `matrix.csv` row quality as part of Q&A correctness going forward,
-   not a separate concern — Q7 showed it doesn't stay contained.
+   not a separate concern — Q7 showed it doesn't stay contained. The
+   matrix-grounding check above (compare matrix rows against source, not
+   just against plausibility) is worth repeating whenever the matrix is
+   regenerated, not just once.
 3. Only after (1) confirms the fix in isolation: proceed to Phase 1B's
    20 → ~100 paper scale-up, budgeting the 20/day cap across either
    multiple days or multiple model IDs as demonstrated here.

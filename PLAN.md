@@ -155,17 +155,22 @@ Done when: the regression table shows the previously-failing aggregate
 questions fixed, the previously-passing ones still pass, and the
 comparison was run on the *same model* as Phase 1A so the fix is isolated
 from unrelated variables.
-**Status: fix implemented and tested, but the regression run that tested
-it was not same-model** — `gemini-3.8-flash`'s 20/day cap was already
-spent on Phase 1A, so this run used `gemini-3.5-flash`/`-lite` instead (see
-`docs/eval-report.md`). Result: 2 clean fixes, 1 fix that inherited a data
-error from the regenerated matrix, 3 regressions that all land on the
-*unchanged* chunk-only path (consistent with the substitute model being
-weaker at precise table-reading, not with the fix breaking anything), 4
-unchanged. The architecture appears to work; the test that would prove it
-cleanly — same model, before vs. after — hasn't been run yet. That's the
-first thing to do before Phase 1B, not a thing to skip because today's
-numbers already look decent.
+**Status: Phase 1A complete. Retrieval-breadth fix implemented, promising
+but not yet isolated. Matrix independently verified against source (19/20
+rows correct; the 1 error, `nnunet`, hand-corrected). Regression
+inconclusive due to a model-quota confound. Phase 1B blocked pending a
+same-model regression.** `gemini-3.8-flash`'s 20/day cap was already spent
+on Phase 1A, so the regression test ran on `gemini-3.5-flash`/`-lite`
+instead (see `docs/eval-report.md`). Result: 2 clean fixes, 1 fix that
+inherited a (now-fixed) data error from the regenerated matrix, 3
+regressions that all land on the *unchanged* chunk-only path (consistent
+with the substitute model being weaker at precise table-reading, not with
+the fix breaking anything), 4 unchanged. Next action, not yet done: re-run
+this exact 10-question set on `gemini-3.8-flash` once its quota resets —
+same corpus, index, (corrected) matrix, classifier, prompts, and `k` — to
+confirm Q6/Q10 stay fixed *and* Q2/Q3/Q9 recover on the model that
+originally got them right. Only after that re-run confirms the fix in
+isolation does Phase 1B start.
 
 ### Phase 1B — ~100 papers, only after 1B-0 is confirmed clean
 Re-run Phase 1B-0's regression once on `gemini-3.8-flash` (quota permitting)
