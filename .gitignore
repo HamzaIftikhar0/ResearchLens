@@ -1,0 +1,18 @@
+# secrets
+.env
+
+# python
+backend/venv/
+backend/__pycache__/
+backend/**/__pycache__/
+*.pyc
+
+# node
+frontend/node_modules/
+frontend/dist/
+
+# v2 retrieval local stores
+backend/.chroma/
+
+# OS
+.DS_Store
