@@ -43,6 +43,66 @@ CORPUS = {
         "filename": "lits-1901.04056.pdf",
         "title": "The Liver Tumor Segmentation Benchmark (LiTS)",
     },
+    "3dunet": {
+        "filename": "3dunet-1606.06650.pdf",
+        "title": "3D U-Net: Learning Dense Volumetric Segmentation from Sparse Annotation",
+    },
+    "vnet": {
+        "filename": "vnet-1606.04797.pdf",
+        "title": "V-Net: Fully Convolutional Neural Networks for Volumetric Medical Image Segmentation",
+    },
+    "hdenseunet": {
+        "filename": "hdenseunet-1709.07330.pdf",
+        "title": "H-DenseUNet: Hybrid Densely Connected UNet for Liver and Tumor Segmentation from CT Volumes",
+    },
+    "cascadedfcn-liver": {
+        "filename": "cascadedfcn-liver-1702.05970.pdf",
+        "title": "Automatic Liver and Tumor Segmentation of CT and MRI Volumes using Cascaded Fully Convolutional Neural Networks",
+    },
+    "msd": {
+        "filename": "msd-2106.05735.pdf",
+        "title": "The Medical Segmentation Decathlon",
+    },
+    "msd-dataset": {
+        "filename": "msd-dataset-1902.09063.pdf",
+        "title": "A large annotated medical image dataset for the development and evaluation of segmentation algorithms",
+    },
+    "transunet": {
+        "filename": "transunet-2102.04306.pdf",
+        "title": "TransUNet: Transformers Make Strong Encoders for Medical Image Segmentation",
+    },
+    "swinunet": {
+        "filename": "swinunet-2105.05537.pdf",
+        "title": "Swin-Unet: Unet-like Pure Transformer for Medical Image Segmentation",
+    },
+    "nnformer": {
+        "filename": "nnformer-2109.03201.pdf",
+        "title": "nnFormer: Interleaved Transformer for Volumetric Segmentation",
+    },
+    "unetr": {
+        "filename": "unetr-2103.10504.pdf",
+        "title": "UNETR: Transformers for 3D Medical Image Segmentation",
+    },
+    "resunetpp": {
+        "filename": "resunetpp-1911.07067.pdf",
+        "title": "ResUNet++: An Advanced Architecture for Medical Image Segmentation",
+    },
+    "doubleunet": {
+        "filename": "doubleunet-2006.04868.pdf",
+        "title": "DoubleU-Net: A Deep Convolutional Neural Network for Medical Image Segmentation",
+    },
+    "segresnet": {
+        "filename": "segresnet-1810.11654.pdf",
+        "title": "3D MRI brain tumor segmentation using autoencoder regularization",
+    },
+    "gdl": {
+        "filename": "gdl-1707.03237.pdf",
+        "title": "Generalised Dice overlap as a deep learning loss function for highly unbalanced segmentations",
+    },
+    "kits19": {
+        "filename": "kits19-1912.01054.pdf",
+        "title": "The state of the art in kidney and kidney tumor segmentation in contrast-enhanced CT imaging: Results of the KiTS19 Challenge",
+    },
 }
 
 
