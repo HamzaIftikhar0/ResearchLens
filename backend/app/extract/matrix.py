@@ -15,6 +15,7 @@ from google import genai
 from google.genai import types
 from pydantic import BaseModel
 
+from app.gemini_retry import with_retry
 from app.ingest.index_store import load_index
 
 load_dotenv()
@@ -60,14 +61,14 @@ def papers_from_index(chunks: list[dict]) -> dict[str, dict]:
 
 def extract_one(client: genai.Client, pages: list[tuple[int, str]]) -> LiteratureMatrixRow:
     excerpts = "\n\n".join(f"[page {page}]\n{text}" for page, text in sorted(pages))
-    response = client.models.generate_content(
+    response = with_retry(lambda: client.models.generate_content(
         model=MODEL,
         contents=[EXTRACTION_PROMPT.format(excerpts=excerpts)],
         config=types.GenerateContentConfig(
             response_mime_type="application/json",
             response_schema=LiteratureMatrixRow,
         ),
-    )
+    ))
     return response.parsed
 
 

@@ -1,7 +1,9 @@
 """Extract corpus/*.pdf page by page, embed each page, save the Phase 0 index.
 
-One embed_content call per paper (batched across that paper's pages) to
-stay well inside the free tier's daily request cap.
+One embed_content call per page (a list of texts in one call returns a
+single combined embedding, not one per page - confirmed by testing). Saves
+after every page and skips pages already in the index, so a 429 mid-run
+costs a retry, not the whole corpus.
 
 Run: python -m app.ingest.build_index
 """
@@ -11,13 +13,12 @@ from pathlib import Path
 import pymupdf
 from dotenv import load_dotenv
 from google import genai
-from google.genai import types
 
-from app.ingest.index_store import save_index
+from app.ingest.embeddings import embed_text
+from app.ingest.index_store import load_index, save_index
 
 load_dotenv()
 
-EMBED_MODEL = "gemini-embedding-2"
 BACKEND_DIR = Path(__file__).resolve().parents[2]
 CORPUS_DIR = BACKEND_DIR.parent / "corpus"
 
@@ -55,24 +56,24 @@ def extract_pages(pdf_path: Path) -> list[tuple[int, str]]:
     return pages
 
 
-def embed_pages(client: genai.Client, texts: list[str]) -> list[list[float]]:
-    response = client.models.embed_content(
-        model=EMBED_MODEL,
-        contents=texts,
-        config=types.EmbedContentConfig(task_type="RETRIEVAL_DOCUMENT"),
-    )
-    return [e.values for e in response.embeddings]
-
-
 def main() -> None:
     client = genai.Client()
-    chunks = []
+
+    try:
+        chunks = load_index()
+    except FileNotFoundError:
+        chunks = []
+    done = {(c["paper"], c["page"]) for c in chunks}
 
     for key, meta in CORPUS.items():
         pages = extract_pages(CORPUS_DIR / meta["filename"])
-        vectors = embed_pages(client, [text for _, text in pages])
+        new_pages = [p for p in pages if (key, p[0]) not in done]
+        if not new_pages:
+            print(f"{key}: already indexed ({len(pages)} pages)")
+            continue
 
-        for (page_num, text), vector in zip(pages, vectors):
+        for page_num, text in new_pages:
+            vector = embed_text(client, text, task_type="RETRIEVAL_DOCUMENT")
             chunks.append({
                 "paper": key,
                 "title": meta["title"],
@@ -80,10 +81,10 @@ def main() -> None:
                 "text": text,
                 "vector": vector,
             })
-        print(f"{key}: {len(pages)} pages indexed")
+            save_index(chunks)
+            print(f"{key}: page {page_num}/{pages[-1][0]} indexed")
 
-    save_index(chunks)
-    print(f"\nWrote {len(chunks)} chunks to the index")
+    print(f"\n{len(chunks)} chunks in the index")
 
 
 if __name__ == "__main__":

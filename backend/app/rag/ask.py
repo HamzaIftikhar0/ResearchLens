@@ -7,9 +7,9 @@ import sys
 
 from dotenv import load_dotenv
 from google import genai
-from google.genai import types
 
-from app.ingest.build_index import EMBED_MODEL
+from app.gemini_retry import with_retry
+from app.ingest.embeddings import embed_text
 from app.ingest.index_store import load_index, top_k
 
 load_dotenv()
@@ -30,21 +30,17 @@ def ask(question: str, k: int = 8) -> None:
     client = genai.Client()
     chunks = load_index()
 
-    query_vector = client.models.embed_content(
-        model=EMBED_MODEL,
-        contents=[question],
-        config=types.EmbedContentConfig(task_type="RETRIEVAL_QUERY"),
-    ).embeddings[0].values
+    query_vector = embed_text(client, question, task_type="RETRIEVAL_QUERY")
 
     retrieved = top_k(query_vector, chunks, k=k)
     excerpts = "\n\n".join(
         f"[{c['title']}, page {c['page']}]\n{c['text']}" for c in retrieved
     )
 
-    response = client.models.generate_content(
+    response = with_retry(lambda: client.models.generate_content(
         model=CHAT_MODEL,
         contents=[PROMPT_TEMPLATE.format(excerpts=excerpts, question=question)],
-    )
+    ))
 
     print(response.text)
     print("\nRetrieved from:")
