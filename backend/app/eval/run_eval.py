@@ -2,14 +2,22 @@
 output (plus per-question latency and aggregate-routing classification) to
 docs/eval-outputs.md for manual grading against docs/answer-key.md.
 
+Saves after every question (to .cache/eval-outputs.json, then renders
+docs/eval-outputs.md from it) and skips questions already answered, same
+pattern as app.ingest.build_index and app.extract.matrix - a crash or a
+quota cutoff mid-run costs the remaining questions, not the ones already
+answered. Starts fresh if CHAT_MODEL differs from the cached run's model,
+so a partial run never silently mixes answers from two different models
+into one report.
+
 This script runs the questions and records what the pipeline said -
 grading that output against the answer key is a separate, human step
-(see docs/eval-report.md). Keeping the two apart means re-running the
-questions never silently overwrites a prior grading.
+(see docs/eval-report.md).
 
 Run: python -m app.eval.run_eval
 """
 
+import json
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -17,6 +25,7 @@ from pathlib import Path
 from app.rag.ask import CHAT_MODEL, ask
 from app.rag.classify import is_aggregate_question
 
+CACHE_PATH = Path(__file__).resolve().parents[2] / ".cache" / "eval-outputs.json"
 OUTPUT_PATH = Path(__file__).resolve().parents[3] / "docs" / "eval-outputs.md"
 
 QUESTIONS = [
@@ -33,35 +42,74 @@ QUESTIONS = [
 ]
 
 
+def load_cache() -> dict:
+    if not CACHE_PATH.exists():
+        return {}
+    return json.loads(CACHE_PATH.read_text())
+
+
+def save_cache(cache: dict) -> None:
+    CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    CACHE_PATH.write_text(json.dumps(cache, indent=2))
+
+
+def render_markdown(cache: dict) -> str:
+    lines = [f"# Eval run output (ungraded)\n\nModel: `{cache['model']}` · Run: {cache['run_started']}\n"]
+    for i, question in enumerate(QUESTIONS, start=1):
+        r = cache["results"].get(str(i))
+        if r is None:
+            continue
+        lines.append(f"## Q{i}. {question}")
+        routed = "aggregate (matrix + excerpts)" if r["aggregate"] else "normal (excerpts only)"
+        lines.append(f"*routed: {routed} · {r['elapsed']:.1f}s*\n")
+        lines.append(f"{r['answer']}\n")
+        lines.append("**Retrieved from:**")
+        for c in r["retrieved"]:
+            lines.append(f"- [{c['title']}, page {c['page']}]")
+        lines.append("")
+    return "\n".join(lines)
+
+
 def main() -> None:
-    timestamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
-    lines = [f"# Eval run output (ungraded)\n\nModel: `{CHAT_MODEL}` · Run: {timestamp}\n"]
-    latencies = {"normal": [], "aggregate": []}
+    cache = load_cache()
+    if cache.get("model") != CHAT_MODEL:
+        if cache:
+            print(f"Cached partial run was on {cache.get('model')}, starting fresh for {CHAT_MODEL}")
+        cache = {
+            "model": CHAT_MODEL,
+            "run_started": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            "results": {},
+        }
 
     for i, question in enumerate(QUESTIONS, start=1):
+        if str(i) in cache["results"]:
+            print(f"[{i}/{len(QUESTIONS)}] already answered")
+            continue
+
         aggregate = is_aggregate_question(question)
         print(f"[{i}/{len(QUESTIONS)}] {'[aggregate] ' if aggregate else ''}{question}")
 
         start = time.monotonic()
         answer, retrieved = ask(question)
         elapsed = time.monotonic() - start
-        latencies["aggregate" if aggregate else "normal"].append(elapsed)
 
-        lines.append(f"## Q{i}. {question}")
-        lines.append(f"*routed: {'aggregate (matrix + excerpts)' if aggregate else 'normal (excerpts only)'} · {elapsed:.1f}s*\n")
-        lines.append(f"{answer}\n")
-        lines.append("**Retrieved from:**")
-        for c in retrieved:
-            lines.append(f"- [{c['title']}, page {c['page']}]")
-        lines.append("")
+        cache["results"][str(i)] = {
+            "answer": answer,
+            "retrieved": retrieved,
+            "aggregate": aggregate,
+            "elapsed": elapsed,
+        }
+        save_cache(cache)
+        OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
+        OUTPUT_PATH.write_text(render_markdown(cache))
 
-    for label, values in latencies.items():
+    done = cache["results"]
+    for label in ("normal", "aggregate"):
+        values = [r["elapsed"] for r in done.values() if r["aggregate"] == (label == "aggregate")]
         if values:
             print(f"{label}: {len(values)} questions, avg {sum(values)/len(values):.1f}s, max {max(values):.1f}s")
 
-    OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
-    OUTPUT_PATH.write_text("\n".join(lines))
-    print(f"\nWrote {len(QUESTIONS)} answers to {OUTPUT_PATH}")
+    print(f"\n{len(done)}/{len(QUESTIONS)} answered; see {OUTPUT_PATH}")
 
 
 if __name__ == "__main__":
