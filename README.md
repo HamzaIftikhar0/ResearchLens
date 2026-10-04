@@ -8,12 +8,13 @@ See [PLAN.md](PLAN.md) for scope, architecture, and phases.
 
 ## Status
 
-Phase 1B-0 done: a 20-paper liver-segmentation test corpus, indexed and
-evaluated against a 10-question hand-built answer key; a retrieval-breadth
-fix for cross-paper aggregate questions, confirmed with a clean same-model
-regression — 10/10 correct, zero hallucinations, zero regressions. No UI
-yet. Next: Phase 1B's 20 → ~100 paper scale-up. See
-[docs/eval-report.md](docs/eval-report.md).
+Phase 1B in progress. Phase 1B-0 (retrieval-breadth fix for cross-paper
+aggregate questions) is done and confirmed with a clean same-model
+regression — 10/10 correct, zero hallucinations, zero regressions. Corpus
+scaled 20 → 72 papers and re-indexed (998 chunks, validated clean); matrix
+extraction and the eval re-run at this scale are next, spread across
+several days to respect the free tier's daily cap. No UI yet. See
+[docs/eval-report.md](docs/eval-report.md) and [PLAN.md](PLAN.md) section 7.
 
 ## Layout
 

@@ -168,19 +168,38 @@ recovered to correct; Q6/Q7/Q10 fixed with no inherited errors now that
 the matrix is correct too). Full table in `docs/eval-report.md`. Phase 1B
 is unblocked.
 
-### Phase 1B — ~100 papers
-Build the full ~100-paper corpus
-and re-run the same evaluation (index validation + the 10-question set,
-extended if needed) at that scale. Extraction alone will take multiple
-days at a 20/day generate_content cap unless load is spread across more
-than one free-tier model id — already demonstrated as a working pattern in
-1B-0, so budget for it rather than being surprised by it again. Also carry
-forward 1B-0's finding that matrix-row errors can surface in Q&A answers
-now, not just in the matrix export — grade matrix quality as part of Q&A
-correctness, not separately.
-Done when: the full matrix matches the hand-built answer key, and the
-10-question set (plus any cross-paper questions specific to the larger
-corpus) grades out correct.
+### Phase 1B — 20 → 72 papers (stopped short of ~100 on purpose)
+Build a materially larger corpus and re-run the same evaluation (index
+validation + the original 10-question set, extended if needed) at that
+scale. Extraction alone will take multiple days at a 20/day
+generate_content cap unless load is spread across more than one free-tier
+model id — already demonstrated as a working pattern in 1B-0, so budget
+for it rather than being surprised by it again. Also carry forward 1B-0's
+finding that matrix-row errors can surface in Q&A answers now, not just in
+the matrix export — grade matrix quality as part of Q&A correctness, not
+separately. Keep the Phase 1A 10-question set and grading criteria frozen
+while scaling, so the comparison stays clean — add new cross-paper
+questions the larger corpus enables, don't replace the baseline ones.
+Failure taxonomy to use when grading, not just "pass/fail": **regression**
+(something that worked at 20 papers stops working), **scaling failure**
+(retrieval becomes incomplete/incorrect because the corpus is bigger —
+e.g. `k=8` may no longer be enough), **new capability** (a question only
+answerable because the larger corpus has the evidence), **matrix error**
+(an extraction/grounding mistake, separate from retrieval).
+Done when: the full matrix matches independently-verified source facts
+(spot-checked, not assumed), and the 10-question set (plus any new
+cross-paper questions) grades out correct at this scale.
+**Status: corpus and index done.** 72 papers (52 added via web search, not
+memory — verified against the actual abstract-page title before
+downloading, same as the original 20; see `corpus/README.md`). Index
+re-validated clean: 998 chunks, 72/72 papers, correct page counts, zero
+duplicates, zero missing. Stopped at 72 rather than forcing exactly
+100 — the goal was a materially larger corpus (3.6x), not a round number,
+per the rule in section 1. Not yet done: matrix extraction for the 52 new
+papers (~72 generate_content calls total if redone from scratch, but only
+the 52 new rows are actually needed — budget ~3 days at 20/day, or split
+across model IDs as already demonstrated), matrix-grounding spot-check at
+this scale, and the eval re-run.
 
 ### Phase 2 — API + real vector DB
 Wrap Phase 0/1 in FastAPI; swap the brute-force JSON/numpy index for Chroma
