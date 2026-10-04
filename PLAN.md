@@ -155,26 +155,21 @@ Done when: the regression table shows the previously-failing aggregate
 questions fixed, the previously-passing ones still pass, and the
 comparison was run on the *same model* as Phase 1A so the fix is isolated
 from unrelated variables.
-**Status: Phase 1A complete. Retrieval-breadth fix implemented, promising
-but not yet isolated. Matrix independently verified against source (19/20
-rows correct; the 1 error, `nnunet`, hand-corrected). Regression
-inconclusive due to a model-quota confound. Phase 1B blocked pending a
-same-model regression.** `gemini-3.8-flash`'s 20/day cap was already spent
-on Phase 1A, so the regression test ran on `gemini-3.5-flash`/`-lite`
-instead (see `docs/eval-report.md`). Result: 2 clean fixes, 1 fix that
-inherited a (now-fixed) data error from the regenerated matrix, 3
-regressions that all land on the *unchanged* chunk-only path (consistent
-with the substitute model being weaker at precise table-reading, not with
-the fix breaking anything), 4 unchanged. Next action, not yet done: re-run
-this exact 10-question set on `gemini-3.8-flash` once its quota resets —
-same corpus, index, (corrected) matrix, classifier, prompts, and `k` — to
-confirm Q6/Q10 stay fixed *and* Q2/Q3/Q9 recover on the model that
-originally got them right. Only after that re-run confirms the fix in
-isolation does Phase 1B start.
+**Status: done.** Phase 1A complete, retrieval-breadth fix implemented,
+matrix independently verified against source (19/20 rows correct, the 1
+error hand-corrected to 20/20). First regression attempt was confounded by
+`gemini-3.8-flash`'s quota forcing a substitute-model test
+(`gemini-3.5-flash`/`-lite`) — 2 clean fixes, 1 fix with an inherited data
+error, 3 regressions, all traced to the substitute model being weaker at
+precise table-reading, not to the fix. **Clean same-model regression on
+`gemini-3.8-flash` the next day: 10/10 correct, zero hallucinations, zero
+regressions from Phase 1A** — confirms the hypothesis exactly (Q2/Q3/Q9
+recovered to correct; Q6/Q7/Q10 fixed with no inherited errors now that
+the matrix is correct too). Full table in `docs/eval-report.md`. Phase 1B
+is unblocked.
 
-### Phase 1B — ~100 papers, only after 1B-0 is confirmed clean
-Re-run Phase 1B-0's regression once on `gemini-3.8-flash` (quota permitting)
-to confirm the fix in isolation. Only then build the full ~100-paper corpus
+### Phase 1B — ~100 papers
+Build the full ~100-paper corpus
 and re-run the same evaluation (index validation + the 10-question set,
 extended if needed) at that scale. Extraction alone will take multiple
 days at a 20/day generate_content cap unless load is spread across more

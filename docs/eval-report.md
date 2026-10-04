@@ -222,28 +222,55 @@ aggregate or normal (see its source), but that instrumentation landed
 *after* this run, to avoid spending more of an already-scarce daily quota
 on a timing-only re-run. The next full re-run will have it for free.
 
+## Clean same-model regression (2026-10-04) — the fix is isolated
+
+Re-ran the identical 10-question set on `gemini-3.8-flash` the next day,
+once its quota genuinely reset (the first attempt the prior day looked
+reset after one probe call but re-exhausted almost immediately — see the
+confound section above; this attempt completed all 10 cleanly). Same
+corpus, same index, same corrected `matrix.csv`, same classifier, same
+prompts, same `k`. Nothing else changed.
+
+| # | Question | Phase 1A (gemini-3.8-flash) | Confounded run (3.5-flash/-lite) | Clean same-model (gemini-3.8-flash) |
+|---|---|---|---|---|
+| 1 | U-Net's dataset | Correct | Correct | **Correct** |
+| 2 | nnU-Net liver Dice | Correct | Wrong numbers | **Correct — recovered, exact** |
+| 3 | U-Net vs. nnU-Net | Correct | Wrong numbers | **Correct — recovered, exact** |
+| 4 | Attention U-Net's target | Correct | Correct | **Correct** |
+| 5 | UNet++ liver result | Correct | Correct | **Correct** |
+| 6 | Which papers report no liver result | Fail (abstained) | Correct (with visible hedging) | **Correct — clean, no hedging, exact 10-paper list** |
+| 7 | CNN vs. transformer on liver | Fail (abstained) | Correct but inherited a wrong number | **Correct — no errors this time** |
+| 8 | H-DenseUNet vs. Cascaded-FCN | Correct | Correct | **Correct** |
+| 9 | Generalised Dice Loss liver result | Correct | Regressed to abstention | **Correct — recovered** |
+| 10 | Organ vs. tumor difficulty (3 benchmarks) | Partial | Correct | **Correct — clean table, all 3 benchmarks** |
+
+**10/10 correct. Zero hallucinations. Zero regressions from Phase 1A.**
+This confirms the hypothesis from the confounded run exactly: Q2/Q3/Q9's
+problems were `gemini-3.5-flash-lite` being weaker at precise table-reading,
+not the routing fix — on the original model, all three are correct again,
+with no code changes needed. Q6, Q7, and Q10 are now fixed cleanly, and Q7
+no longer inherits a wrong number from the matrix now that the matrix
+itself is correct. Latency: normal (chunk-only) questions averaged 20.3s
+(max 52.6s, that max including retry backoff on a transient error, not
+pure generation time); aggregate (matrix + excerpts) questions averaged
+30.8s (max 45.1s) — the larger prompt costs a few seconds, not an
+architectural problem.
+
 ## Current status
 
-**Phase 1A: complete. Retrieval-breadth fix: implemented, promising but
-not yet isolated. Matrix: independently verified (19/20 correct, the 1
-known error now hand-corrected). Regression: inconclusive due to a
-model-quota confound. Phase 1B: blocked pending a same-model regression.**
+**Phase 1A: complete. Retrieval-breadth fix: implemented and confirmed in
+isolation — 10/10, zero regressions. Matrix: independently verified and
+corrected (20/20). Phase 1B: unblocked.**
 
 ## What's next
 
-1. **Re-run this exact 10-question set on `gemini-3.8-flash`**, same
-   corpus, same index, same (now-corrected) matrix, same classifier, same
-   prompts, same `k`, same answer key — once its quota resets. This is the
-   one genuinely missing piece. The comparison that matters: do Q6/Q10
-   stay fixed *and* do Q2/Q3/Q9 recover back to Phase 1A's correct answers
-   on the model that originally got them right? If yes, the fix is clean.
-   If Q6/Q10 stay fixed but something *else* regresses on this same model,
-   the fix itself needs investigating, not just the quota.
-2. Treat `matrix.csv` row quality as part of Q&A correctness going forward,
-   not a separate concern — Q7 showed it doesn't stay contained. The
-   matrix-grounding check above (compare matrix rows against source, not
-   just against plausibility) is worth repeating whenever the matrix is
-   regenerated, not just once.
-3. Only after (1) confirms the fix in isolation: proceed to Phase 1B's
-   20 → ~100 paper scale-up, budgeting the 20/day cap across either
-   multiple days or multiple model IDs as demonstrated here.
+1. Proceed to Phase 1B's 20 → ~100 paper scale-up, budgeting the 20/day
+   `generate_content` cap across either multiple days or multiple model
+   IDs (both demonstrated working patterns from this phase).
+2. Keep treating `matrix.csv` row quality as part of Q&A correctness, not
+   a separate concern — re-run the matrix-grounding check (compare rows
+   against source, not just plausibility) whenever the matrix is
+   regenerated at the larger scale, not just once.
+3. `app.eval.run_eval` and `app.extract.matrix` are both resumable now;
+   `app.ingest.build_index` always was. No known non-resumable step left
+   in the pipeline for the Phase 1B scale-up.
